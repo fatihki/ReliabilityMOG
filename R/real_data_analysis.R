@@ -1,4 +1,3 @@
-# example for the real data application 
 #================================================================================================================
 # Application of the methods to the hydrological dataset from Istanbul, Türkiye
 #
