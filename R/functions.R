@@ -200,6 +200,95 @@ log_posterior <- function(par, data, hyperparameters) {
     return(L) }
 }
 
+# RMO_bootstrap function for the real data case
+RMO_bootstrap_R1           <- function(g1, g2, n, m, alpha1.hat, r1.hat, s1.hat, alpha2.hat, r2.hat, s2.hat, R_BFGS.hat, B, B1, parallel = TRUE, seed ){
+  
+  R_bootstrap_BFGS         <- sd_Rstar_boot <- t_star <- c()
+  
+  if(parallel){
+    boot.results           <- foreach( i=1:B, .combine=rbind) %dopar% {
+      boot.fit             <- RMO_bootstrap_step_R1(g1, g2,  n, m, alpha1.hat, r1.hat, s1.hat, alpha2.hat, r2.hat, s2.hat, seed + i )
+      # boot.t calculation
+      boot.t.fit           <- lapply( 1:B1, function(j) { 
+        RMO_bootstrap_step(g1, g2,  n, m, alpha1.hat = boot.fit$optim.X_BFGS_result$par[1], r1.hat = boot.fit$optim.X_BFGS_result$par[2], s1.hat = boot.fit$optim.X_BFGS_result$par[3],
+                              alpha2.hat = boot.fit$optim.Y_BFGS_result$par[1], r2.hat = boot.fit$optim.Y_BFGS_result$par[2], s2.hat = boot.fit$optim.Y_BFGS_result$par[3], seed + j  )$R_bootstrap_BFGS
+      })
+      return( c( R_bootstrap = boot.fit$R_bootstrap_BFGS, sd_Rstar_boot = sd(unlist(boot.t.fit)) ) )
+    }
+    
+    R_bootstrap_BFGS       <- as.numeric(boot.results[, 1])
+    sd_Rstar_boot          <- as.numeric(boot.results[, 2])
+  }
+  
+  t_star                   <- ( R_bootstrap_BFGS -  R_BFGS.hat ) /sd_Rstar_boot
+  
+  return( list( R_bootstrap_BFGS = R_bootstrap_BFGS, t_star = t_star ) )
+}
+
+# RMO_bootstrap_step_R1 for the real data case
+RMO_bootstrap_step_R1     <- function(g1, g2,  n, m, alpha1.hat, r1.hat, s1.hat, alpha2.hat, r2.hat, s2.hat, seed ){
+  
+  set.seed(seed) 
+  x.star                  <- rmog(n, spec=g1, beta=alpha1.hat, r=r1.hat, s = s1.hat)
+  set.seed(seed + 2024) 
+  y.star                  <- rmog(m, spec=g2, beta=alpha2.hat, r=r2.hat, s = s2.hat)
+  
+  initials.x.bootstrap    <- runif(1,0.75,1.25)*c(alpha1.hat, r1.hat, s1.hat)
+  initials.y.bootstrap    <- runif(1,0.75,1.25)*c(alpha2.hat, r2.hat, s2.hat)
+  
+  # using optim with "BFGS" algorithm
+  optim.X_BFGS_result     <- try( optim(par = initials.x.bootstrap, fn = log_likelihood, gr = grad_log_likelihood,
+                                      g = g1, data = x.star, method = "BFGS" , control = list(maxit = 20000), hessian = F) )
+  
+  if ( class( optim.X_BFGS_result ) == "try-error") {
+    set.seed(seed + 5 ) 
+    x.star                <- rmog(n, spec=g1, beta=alpha1.hat, r=r1.hat, s = s1.hat)
+    initials.x.bootstrap  <- runif(1,0.75,1.25)*c(alpha1.hat, r1.hat, s1.hat)
+    optim.X_BFGS_result   <- try( optim(par = initials.x.bootstrap, fn = log_likelihood, gr = grad_log_likelihood,
+                                        g = g1, data = x.star, method = "BFGS" , control = list(maxit = 20000), hessian = F) )
+  }
+  
+  if ( class( optim.X_BFGS_result ) == "try-error") {
+    set.seed(seed + 15 ) 
+    x.star                <- rmog(n, spec=g1, beta=alpha1.hat, r=r1.hat, s = s1.hat)
+    initials.x.bootstrap  <- runif(1,0.75,1.25)*c(alpha1.hat, r1.hat, s1.hat)
+    optim.X_BFGS_result   <- try( optim(par = initials.x.bootstrap, fn = log_likelihood, gr = grad_log_likelihood,
+                                        g = g1, data = x.star, method = "BFGS" , control = list(maxit = 20000), hessian = F) )
+  }
+  
+  if ( class( optim.X_BFGS_result ) == "try-error") {
+    next
+  }
+  
+  optim.Y_BFGS_result    <- try( optim(par = initials.y.bootstrap, fn = log_likelihood, gr = grad_log_likelihood,
+                                      g = g2, data = y.star, method = "BFGS" , control = list(maxit = 20000), hessian = F) )
+  
+  if ( class( optim.Y_BFGS_result ) == "try-error") {
+    set.seed(seed + 2024 + 5) 
+    y.star                <- rmog(m, spec=g2, beta=alpha2.hat, r=r2.hat, s = s2.hat)
+    initials.y.bootstrap  <- runif(1,0.75,1.25)*c(alpha2.hat, r2.hat, s2.hat)
+    optim.Y_BFGS_result   <- try( optim(par = initials.y.bootstrap, fn = log_likelihood, gr = grad_log_likelihood,
+                                        g = g2, data = y.star, method = "BFGS" , control = list(maxit = 20000), hessian = F) )
+  }
+  
+  if ( class( optim.Y_BFGS_result ) == "try-error") {
+    set.seed(seed + 2024 + 15) 
+    y.star                <- rmog(m, spec=g2, beta=alpha2.hat, r=r2.hat, s = s2.hat)
+    initials.y.bootstrap  <- runif(1,0.75,1.25)*c(alpha2.hat, r2.hat, s2.hat)
+    optim.Y_BFGS_result   <- try( optim(par = initials.y.bootstrap, fn = log_likelihood, gr = grad_log_likelihood,
+                                        g = g2, data = y.star, method = "BFGS" , control = list(maxit = 20000), hessian = F) )
+  }
+  
+  if ( class( optim.Y_BFGS_result ) == "try-error") {
+    next
+  }
+  
+  R_bootstrap_BFGS     <- R_MO(g1, g2, alpha1=optim.X_BFGS_result$par[1], r1=optim.X_BFGS_result$par[2], s1=optim.X_BFGS_result$par[3],
+                               alpha2=optim.Y_BFGS_result$par[1], r2=optim.Y_BFGS_result$par[2], s2=optim.Y_BFGS_result$par[3], N, previous.sample=NA, seed=1)$value  #usage seed = 1 for the real data, in other case usage "seed"
+  
+  return( list( R_bootstrap_BFGS = R_bootstrap_BFGS,  optim.X_BFGS_result=optim.X_BFGS_result,  optim.Y_BFGS_result=optim.Y_BFGS_result ) )
+  
+}
 
 # for real data analysis
 Model_evaluation_MOG <- function(g, par, data) {
